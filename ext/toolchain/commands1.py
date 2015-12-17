@@ -259,7 +259,13 @@ class InternalCommands:
 		3 : VisualStudioGenerator('9 2008'),
 		4 : VisualStudioGenerator('9 2008 Win64'),
 		5 : VisualStudioGenerator('8 2005'),
-		6 : VisualStudioGenerator('8 2005 Win64')
+		6 : VisualStudioGenerator('Visual Studio 8 2005 Win64'),
+		7 : VisualStudioGenerator('11'),
+		8 : VisualStudioGenerator('11 2012 Win64'),
+		9 : VisualStudioGenerator('12 2013'),
+		10 : VisualStudioGenerator('12 2013 Win64'),
+		11 : VisualStudioGenerator('14 2015'),
+		12 : VisualStudioGenerator('14 2015 Win64'),
 	}
 
 	unix_generators = {
@@ -888,7 +894,10 @@ class InternalCommands:
 
 		if generator.startswith('Visual Studio'):
 			# special case for version 10, use new /target:clean
-			if generator.startswith('Visual Studio 10'):
+			if generator.startswith('Visual Studio 10') or \
+			   generator.startswith('Visual Studio 11') or \
+			   generator.startswith('Visual Studio 12') or \
+			   generator.startswith('Visual Studio 14'):
 				for target in targets:
 					self.run_vcbuild(generator, target, self.sln_filepath(), '/target:clean')
 				
@@ -1725,6 +1734,12 @@ class InternalCommands:
 			value,type = _winreg.QueryValueEx(key, '9.0')
 		elif generator.startswith('Visual Studio 10'):
 			value,type = _winreg.QueryValueEx(key, '10.0')
+		elif generator.startswith('Visual Studio 11'):
+			value,type = _winreg.QueryValueEx(key, '11.0')
+		elif generator.startswith('Visual Studio 12'):
+			value,type = _winreg.QueryValueEx(key, '12.0')
+		elif generator.startswith('Visual Studio 14'):
+			value,type = _winreg.QueryValueEx(key, '14.0')
 		else:
 			raise Exception('Cannot determine vcvarsall.bat location for: ' + generator)
 		
@@ -1738,6 +1753,21 @@ class InternalCommands:
 			raise Exception("'%s' not found." % path)
 		
 		return path
+	def get_msbuild(self):
+		import _winreg
+
+		msbuild = u""
+		for version in ('14.0', '12.0', '4.0', '3.5', '2.0'):
+			key_name = r'SOFTWARE\Microsoft\MSBuild\ToolsVersions\%s' % version
+			try:
+				key = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, key_name)
+				value,type = _winreg.QueryValueEx(key, 'MSBuildToolsPath')
+				msbuild = os.path.join(value, u"MSBuild.exe")
+				if os.path.exists(msbuild):
+					return msbuild
+			except:
+				pass
+		raise Exception("MSBuild not found.")
 
 	def run_vcbuild(self, generator, mode, solution, args='', dir='', config32='Win32'):
 		import platform
@@ -1767,29 +1797,32 @@ class InternalCommands:
 		else:
 			config = 'Debug'
 				
-		if generator.startswith('Visual Studio 10'):
+		if generator.startswith('Visual Studio 10') or \
+		   generator.startswith('Visual Studio 11') or \
+		   generator.startswith('Visual Studio 12') or \
+		   generator.startswith('Visual Studio 14'):
+			config = config + '|' + config_platform
 			cmd = ('@echo off\n'
-				'call "%s" %s \n'
-				'cd "%s"\n'
-				'msbuild /nologo %s /p:Configuration="%s" /p:Platform="%s" "%s"'
-				) % (self.get_vcvarsall(generator), vcvars_platform, dir, args, config, config_platform, solution)
+			'call "%s" %s \n'
+			'cd "%s"\n'
+			'"%s" /nologo %s /p:Configuration="%s" /p:Platform="%s" "%s"'
+			) % (self.get_vcvarsall(generator), vcvars_platform, dir, self.get_msbuild(), args, config, config_platform, solution)
 		else:
 			config = config + '|' + config_platform
 			cmd = ('@echo off\n'
-				'call "%s" %s \n'
-				'cd "%s"\n'
-				'vcbuild /nologo %s "%s" "%s"'
-				) % (self.get_vcvarsall(generator), vcvars_platform, dir, args, solution, config)
-		
-		# Generate a batch file, since we can't use environment variables directly.
-		temp_bat = self.getBuildDir() + r'\vcbuild.bat'
-		file = open(temp_bat, 'w')
-		file.write(cmd)
-		file.close()
+			'call "%s" %s \n'
+			'cd "%s"\n'
+			'vcbuild /nologo %s "%s" "%s"'
+			) % (self.get_vcvarsall(generator), vcvars_platform, dir, args, solution, config)
+			# Generate a batch file, since we can't use environment variables directly.
+			temp_bat = self.getBuildDir() + r'\vcbuild.bat'
+			file = open(temp_bat, 'w')
+			file.write(cmd)
+			file.close()
 
-		err = os.system(temp_bat)
-		if err != 0:
-			raise Exception('Microsoft compiler failed with error code: ' + str(err))
+			err = os.system(temp_bat)
+			if err != 0:
+				raise Exception('Microsoft compiler failed with error code: ' + str(err))
 
 	def ensure_setup_latest(self):
 		if not self.min_setup_version(self.setup_version):
